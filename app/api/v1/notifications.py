@@ -40,7 +40,8 @@ async def send_push_notification(
                 data=string_data,
                 tokens=tokens,
             )
-            response = messaging.send_multicast(message)
+            # send_multicast is deprecated/removed in some versions. Using send_each_for_multicast.
+            response = messaging.send_each_for_multicast(message)
             return {"success": True, "success_count": response.success_count}
     except Exception as e:
         logger.error(f"Error sending push notification via Firebase: {e}")

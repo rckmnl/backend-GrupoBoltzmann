@@ -12,4 +12,4 @@ qrcode[pil]
 jinja2
 email-validator
 pydantic[email]
-firebase-admin
+firebase-admin>=6.5.0

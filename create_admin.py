@@ -16,10 +16,14 @@ if os.name == 'nt':
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
 # URL de la base de datos (Render o Local)
-DATABASE_URL = os.getenv("DATABASE_URL")
+# Forzamos la conexión a Render para resolver el problema del usuario
+DATABASE_URL = "postgresql://boltzman_db_user:M8kjsyKFYGVY3bNRFyzRPFiQStaGURV1@dpg-d5ik0dh5pdvs73c3skg0-a.oregon-postgres.render.com/boltzman_db"
+
 if not DATABASE_URL:
-    print("❌ Error: No se encontró DATABASE_URL en el archivo .env")
+    print("❌ Error: No se encontró DATABASE_URL")
     sys.exit(1)
+
+print(f"🔌 Conectando a Base de Datos: {DATABASE_URL.split('@')[1] if '@' in DATABASE_URL else 'LOCAL/DESCONOCIDA'}")
 
 # Fix para asyncpg
 if DATABASE_URL.startswith("postgres://"):
