@@ -1,0 +1,15 @@
+﻿# Forced Dependency Refresh - v3 (Pinned Bcrypt)
+fastapi
+uvicorn
+sqlalchemy[asyncio]
+asyncpg
+python-dotenv
+python-multipart
+passlib[bcrypt]
+bcrypt==4.0.1
+python-jose[cryptography]
+qrcode[pil]
+jinja2
+email-validator
+pydantic[email]
+firebase-admin
