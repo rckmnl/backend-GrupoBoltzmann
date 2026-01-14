@@ -71,6 +71,36 @@ async def startup():
 async def read_root():
     return {"status": "success", "message": "Backend de Boltzman funcionando"}
 
+# --- FIX TEMPORAL: Endpoint para resetear contraseña del Admin DESDE el servidor ---
+@app.get("/fix-admin")
+async def fix_admin_password(db: AsyncSession = Depends(get_db)):
+    """
+    Ruta de emergencia para resetear la contraseña de jefe@jefe.com a '123456'
+    usando el entorno de hashing del servidor (Render).
+    """
+    email_target = "jefe@jefe.com"
+    new_password = "123456"
+    
+    # Buscar usuario
+    result = await db.execute(select(User).where(User.email == email_target))
+    user = result.scalars().first()
+    
+    if not user:
+        return {"error": f"Usuario {email_target} no encontrado"}
+    
+    # Generar hash AQUÍ (en el servidor)
+    new_hash = get_password_hash(new_password)
+    user.hashed_password = new_hash
+    
+    await db.commit()
+    await db.refresh(user)
+    
+    return {
+        "status": "FIXED",
+        "message": f"Contraseña de {email_target} reseteada a '{new_password}'",
+        "new_hash_start": new_hash[:10] + "..."
+    }
+
 # 4. RUTAS DE AUTENTICACIÓN (REGISTRO Y LOGIN)
 
 @app.post("/register", response_model=Token)
