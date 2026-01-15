@@ -4,6 +4,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from fastapi.security import OAuth2PasswordRequestForm
 import os
+from pydantic import BaseModel
+from datetime import datetime
 from fastapi.staticfiles import StaticFiles
 
 # Importaciones de tus propios módulos
@@ -187,6 +189,120 @@ async def login(
         "token_type": "bearer",
         "user": user
     }
+
+# --- PASSWORD RECOVERY FLOW ---
+
+class ForgotPasswordRequest(BaseModel):
+    email: str
+
+class ResetPasswordRequest(BaseModel):
+    token: str
+    new_password: str
+
+@app.post("/auth/forgot-password")
+async def forgot_password(
+    data: ForgotPasswordRequest,
+    db: AsyncSession = Depends(get_db)
+):
+    # 1. Verificar si existe el usuario
+    result = await db.execute(select(User).where(User.email == data.email))
+    user = result.scalars().first()
+    
+    if not user:
+        # Por seguridad, no decimos si el email existe o no, pero logueamos
+        print(f"[SECURITY] Forgot password requested for unexisting email: {data.email}")
+        return {"message": "Si el correo existe, recibirás un código de recuperación."}
+    
+    # 2. Generar Token (6 dígitos)
+    import random
+    token_str = f"{random.randint(100000, 999999)}"
+    
+    # 3. Guardar en DB
+    from app.models.models import PasswordResetToken
+    new_token = PasswordResetToken(
+        user_id=user.id,
+        token=token_str,
+        expires_at=datetime.utcnow() + timedelta(minutes=15),
+        used=False
+    )
+    db.add(new_token)
+    await db.commit()
+    
+    # 4. Enviar Email
+    smtp_email = os.getenv("SMTP_EMAIL")
+    smtp_password = os.getenv("SMTP_PASSWORD")
+
+    if smtp_email and smtp_password:
+        try:
+            import smtplib
+            from email.message import EmailMessage
+
+            msg = EmailMessage()
+            msg.set_content(f"Hola,\n\nTu código para restablecer la contraseña en Boltzman es:\n\n{token_str}\n\nEste código expira en 15 minutos.\n\nSi no solicitaste esto, ignora este mensaje.")
+            msg["Subject"] = "Recuperación de Contraseña - Boltzman"
+            msg["From"] = smtp_email
+            msg["To"] = data.email
+
+            # Conexión SMTP (Gmail usa 587 para TLS)
+            with smtplib.SMTP("smtp.gmail.com", 587) as server:
+                server.starttls()
+                server.login(smtp_email, smtp_password)
+                server.send_message(msg)
+            
+            print(f"[INFO] Email enviado correctamente a {data.email}")
+        except Exception as e:
+            print(f"[ERROR] Falló el envío de email SMTP: {e}")
+            # Fallback a consola si falla SMTP
+            print(f"\n" + "="*50)
+            print(f"📧 [MOCK EMAIL] To: {data.email}")
+            print(f"📧 Body: Tu código de recuperación es: {token_str}")
+            print("="*50 + "\n")
+    else:
+        # Mock si no hay config
+        print(f"\n" + "="*50)
+        print(f"📧 [MOCK EMAIL] To: {data.email}")
+        print(f"📧 Subject: Recuperación de Contraseña - Boltzman")
+        print(f"📧 Body: Tu código de recuperación es: {token_str}")
+        print("="*50 + "\n")
+    
+    return {"message": "Si el correo existe, recibirás un código de recuperación."}
+
+@app.post("/auth/reset-password")
+async def reset_password(
+    data: ResetPasswordRequest,
+    db: AsyncSession = Depends(get_db)
+):
+    from app.models.models import PasswordResetToken
+    
+    # 1. Buscar el token
+    result = await db.execute(select(PasswordResetToken).where(PasswordResetToken.token == data.token))
+    reset_token = result.scalars().first()
+    
+    if not reset_token:
+        raise HTTPException(status_code=400, detail="Código inválido")
+        
+    if reset_token.used:
+        raise HTTPException(status_code=400, detail="Este código ya fue usado")
+        
+    if reset_token.expires_at < datetime.utcnow():
+        raise HTTPException(status_code=400, detail="El código ha expirado")
+        
+    # 2. Buscar usuario asociado
+    result_user = await db.execute(select(User).where(User.id == reset_token.user_id))
+    user = result_user.scalars().first()
+    
+    if not user:
+        raise HTTPException(status_code=404, detail="Usuario no encontrado")
+        
+    # 3. Actualizar contraseña
+    user.hashed_password = get_password_hash(data.new_password)
+    
+    # 4. Marcar token como usado
+    reset_token.used = True
+    
+    await db.commit()
+    
+    return {"message": "Contraseña actualizada exitosamente"}
 
 # 5. REGISTRO DE ROUTERS Y ARCHIVOS ESTÁTICOS
 app.include_router(users.router, prefix="/users", tags=["Gestión de Usuarios"])

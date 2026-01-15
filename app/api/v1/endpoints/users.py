@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, File, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from typing import List
@@ -140,6 +140,41 @@ async def delete_user(
     await db.delete(db_user)
     await db.commit()
     return None
+
+import shutil
+import os
+from fastapi import File, UploadFile
+
+@router.post("/me/photo")
+async def upload_profile_photo(
+    file: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Sube una foto de perfil para el usuario actual."""
+    # 1. Crear directorio si no existe
+    upload_dir = "static/uploads/profiles"
+    os.makedirs(upload_dir, exist_ok=True)
+    
+    # 2. Generar nombre único
+    import time
+    timestamp = int(time.time())
+    file_extension = file.filename.split('.')[-1]
+    file_name = f"user_{current_user.id}_{timestamp}.{file_extension}"
+    file_path = os.path.join(upload_dir, file_name)
+    
+    # 3. Guardar archivo
+    with open(file_path, "wb") as buffer:
+        shutil.copyfileobj(file.file, buffer)
+        
+    # 4. Actualizar usuario
+    relative_path = f"/static/uploads/profiles/{file_name}"
+    current_user.photo_url = relative_path
+    
+    await db.commit()
+    await db.refresh(current_user)
+    
+    return {"status": "success", "photo_url": relative_path}
 
 # ========== SISTEMA DE INVITACIONES ==========
 import secrets

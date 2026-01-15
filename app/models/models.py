@@ -31,8 +31,21 @@ class User(Base):
     role = Column(Enum(UserRole), default=UserRole.CLIENT_RESIDENTIAL)
     organization_id = Column(Integer, ForeignKey("organizations.id"))
     push_token = Column(String, nullable=True) # Token para notificaciones push
+    photo_url = Column(String, nullable=True) # --- NUEVO: Foto de perfil
+    phone_number = Column(String, nullable=True) # --- NUEVO: Teléfono de contacto
 
     organization = relationship("Organization", back_populates="users")
+
+class PasswordResetToken(Base):
+    __tablename__ = "password_reset_tokens"
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"))
+    token = Column(String, unique=True, index=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    expires_at = Column(DateTime, nullable=False)
+    used = Column(Boolean, default=False)
+    
+    user = relationship("User")
 
 class Device(Base):
     __tablename__ = "devices"

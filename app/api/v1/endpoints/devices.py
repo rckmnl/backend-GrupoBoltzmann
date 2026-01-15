@@ -185,10 +185,8 @@ async def get_device_qr(
     if not db_device:
         raise HTTPException(status_code=404, detail="Equipo no encontrado")
 
-    # USAMOS LA IP CONFIGURADA O LOCAL
-    mi_ip = "192.168.0.110"
-    # El link apunta a la página de verificación web
-    qr_data = f"http://{mi_ip}:8000/devices/verify/{device_id}"
+    # Updated to use Deep Linking Scheme
+    qr_data = f"boltzman://device/{device_id}"
 
     qr = qrcode.QRCode(version=1, box_size=10, border=5)
     qr.add_data(qr_data)
