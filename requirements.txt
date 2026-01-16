@@ -13,3 +13,4 @@ jinja2
 email-validator
 pydantic[email]
 firebase-admin>=6.5.0
+requests

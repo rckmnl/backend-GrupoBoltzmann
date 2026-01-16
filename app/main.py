@@ -229,30 +229,42 @@ async def forgot_password(
     await db.commit()
     
     # 4. Enviar Email
-    smtp_email = os.getenv("SMTP_EMAIL")
-    smtp_password = os.getenv("SMTP_PASSWORD")
+    sendgrid_api_key = os.getenv("SENDGRID_API_KEY")
 
-    if smtp_email and smtp_password:
+    if sendgrid_api_key:
         try:
-            import smtplib
-            from email.message import EmailMessage
-
-            msg = EmailMessage()
-            msg.set_content(f"Hola,\n\nTu código para restablecer la contraseña en Boltzman es:\n\n{token_str}\n\nEste código expira en 15 minutos.\n\nSi no solicitaste esto, ignora este mensaje.")
-            msg["Subject"] = "Recuperación de Contraseña - Boltzman"
-            msg["From"] = smtp_email
-            msg["To"] = data.email
-
-            # Conexión SMTP (Gmail usa 587 para TLS)
-            with smtplib.SMTP("smtp.gmail.com", 587) as server:
-                server.starttls()
-                server.login(smtp_email, smtp_password)
-                server.send_message(msg)
+            import requests
             
-            print(f"[INFO] Email enviado correctamente a {data.email}")
+            email_data = {
+                "personalizations": [{
+                    "to": [{"email": data.email}],
+                    "subject": "Recuperación de Contraseña - Boltzman"
+                }],
+                "from": {"email": os.getenv("SMTP_EMAIL", "noreply@boltzman.com")},
+                "content": [{
+                    "type": "text/plain",
+                    "value": f"Hola,\n\nTu código para restablecer la contraseña en Boltzman es:\n\n{token_str}\n\nEste código expira en 15 minutos.\n\nSi no solicitaste esto, ignora este mensaje."
+                }]
+            }
+            
+            response = requests.post(
+                "https://api.sendgrid.com/v3/mail/send",
+                headers={
+                    "Authorization": f"Bearer {sendgrid_api_key}",
+                    "Content-Type": "application/json"
+                },
+                json=email_data
+            )
+            
+            if response.status_code == 202:
+                print(f"[INFO] Email enviado correctamente a {data.email} via SendGrid")
+            else:
+                print(f"[ERROR] SendGrid error: {response.status_code} - {response.text}")
+                raise Exception(f"SendGrid error: {response.status_code}")
+                
         except Exception as e:
-            print(f"[ERROR] Falló el envío de email SMTP: {e}")
-            # Fallback a consola si falla SMTP
+            print(f"[ERROR] Falló el envío de email: {e}")
+            # Fallback a consola
             print(f"\n" + "="*50)
             print(f"📧 [MOCK EMAIL] To: {data.email}")
             print(f"📧 Body: Tu código de recuperación es: {token_str}")
