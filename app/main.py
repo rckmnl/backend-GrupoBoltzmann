@@ -243,7 +243,20 @@ async def forgot_password(
                 "from": {"email": os.getenv("SMTP_EMAIL", "noreply@boltzman.com")},
                 "content": [{
                     "type": "text/plain",
-                    "value": f"Hola,\n\nTu código para restablecer la contraseña en Boltzman es:\n\n{token_str}\n\nEste código expira en 15 minutos.\n\nSi no solicitaste esto, ignora este mensaje."
+                    "value": f"""
+            <html>
+                <body>
+                    <div style="font-family: sans-serif; padding: 20px;">
+                        <h2>Hola,</h2>
+                        <p>Has solicitado restablecer tu contraseña en <strong>Boltzman</strong>.</p>
+                        <p style="font-size: 24px; font-weight: bold; color: #4A90E2;">{token_str}</p>
+                        <p>Este código expirará en 15 minutos por tu seguridad.</p>
+                        <hr>
+                        <p style="font-size: 12px; color: #888;">Si no solicitaste este cambio, puedes ignorar este correo de forma segura.</p>
+                    </div>
+                </body>
+            </html>
+        """
                 }]
             }
             

@@ -3,6 +3,7 @@ fastapi
 uvicorn
 sqlalchemy[asyncio]
 asyncpg
+aiosqlite
 python-dotenv
 python-multipart
 passlib[bcrypt]
