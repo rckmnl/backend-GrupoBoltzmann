@@ -1,6 +1,7 @@
 from firebase_admin import messaging
 from typing import List, Union, Dict, Any
 import logging
+import requests
 
 logger = logging.getLogger(__name__)
 
@@ -11,7 +12,8 @@ async def send_push_notification(
     data: Dict[str, Any] = None
 ):
     """
-    Envía una notificación push DIRECTAMENTE mediante Firebase Cloud Messaging (V1).
+    Envía notificaciones push usando Expo Push Service (recomendado para Expo Go)
+    o directamente mediante Firebase Cloud Messaging.
     """
     if not tokens:
         return
@@ -23,26 +25,53 @@ async def send_push_notification(
     if not tokens:
         return
 
-    string_data = {k: str(v) for k, v in (data or {}).items()}
+    expo_tokens = [t for t in tokens if t.startswith("ExponentPushToken")]
+    native_tokens = [t for t in tokens if not t.startswith("ExponentPushToken")]
 
-    try:
-        if len(tokens) == 1:
-            message = messaging.Message(
-                notification=messaging.Notification(title=title, body=body),
-                data=string_data,
-                token=tokens[0],
-            )
-            response = messaging.send(message)
-            return {"success": True, "response": response}
-        else:
-            message = messaging.MulticastMessage(
-                notification=messaging.Notification(title=title, body=body),
-                data=string_data,
-                tokens=tokens,
-            )
-            # send_multicast is deprecated/removed in some versions. Using send_each_for_multicast.
-            response = messaging.send_each_for_multicast(message)
-            return {"success": True, "success_count": response.success_count}
-    except Exception as e:
-        logger.error(f"Error sending push notification via Firebase: {e}")
-        return None
+    # 1. ENVIAR VIA EXPO
+    if expo_tokens:
+        try:
+            print(f"[INFO] Enviando {len(expo_tokens)} notificaciones via Expo...")
+            expo_url = "https://exp.host/--/api/v2/push/send"
+            messages = []
+            for token in expo_tokens:
+                messages.append({
+                    "to": token,
+                    "title": title,
+                    "body": body,
+                    "data": data or {},
+                    "sound": "default"
+                })
+            
+            response = requests.post(expo_url, json=messages)
+            if response.status_code == 200:
+                print(f"[SUCCESS] Notificaciones Expo enviadas: {response.text}")
+            else:
+                print(f"[ERROR] Expo API error: {response.status_code} - {response.text}")
+        except Exception as e:
+            print(f"[ERROR] Fallo al enviar via Expo: {e}")
+
+    # 2. ENVIAR VIA FIREBASE (Original)
+    if native_tokens:
+        string_data = {k: str(v) for k, v in (data or {}).items()}
+        try:
+            print(f"[INFO] Enviando {len(native_tokens)} notificaciones via Firebase...")
+            if len(native_tokens) == 1:
+                message = messaging.Message(
+                    notification=messaging.Notification(title=title, body=body),
+                    data=string_data,
+                    token=native_tokens[0],
+                )
+                response = messaging.send(message)
+                return {"success": True, "response": response}
+            else:
+                message = messaging.MulticastMessage(
+                    notification=messaging.Notification(title=title, body=body),
+                    data=string_data,
+                    tokens=native_tokens,
+                )
+                response = messaging.send_each_for_multicast(message)
+                return {"success": True, "success_count": response.success_count}
+        except Exception as e:
+            logger.error(f"Error sending push notification via Firebase: {e}")
+            return None

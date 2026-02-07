@@ -87,10 +87,13 @@ class MaintenanceLog(Base):
     appointment = relationship("ServiceAppointment", back_populates="maintenance_logs")
 
 class AppointmentStatus(enum.Enum):
-    PENDING = "pending"      # El cliente la pidió, pero no ha sido confirmada
-    SCHEDULED = "scheduled"  # Ya tiene técnico y hora confirmada
-    IN_PROGRESS = "in_progress" # El técnico está trabajando
-    COMPLETED = "completed"  # El servicio se realizó
+    PENDING = "pending"          # El cliente la pidió, pero no ha sido confirmada
+    SCHEDULED = "scheduled"      # Ya tiene técnico y hora confirmada
+    IN_PROGRESS = "in_progress"  # El técnico está trabajando
+    COMPLETED = "completed"      # El servicio se realizó físicamente
+    PENDING_PAYMENT = "pending_payment"   # Trabajo listo, esperando reporte de pago
+    PAYMENT_VERIFYING = "payment_verifying" # Pago reportado, esperando validación Admin
+    PAID = "paid"                # Pago validado por Admin
     CANCELLED = "cancelled"
 
 class ServiceAppointment(Base):
@@ -122,6 +125,11 @@ class ServiceAppointment(Base):
     
     created_at = Column(DateTime, default=datetime.utcnow)
     
+    # --- NUEVOS CAMPOS DE PAGO ---
+    total_cost = Column(Float, default=0.0)
+    payment_reference = Column(String, nullable=True)
+    payment_screenshot_url = Column(String, nullable=True)
+    
     # --- NUEVO: Calificación del Servicio ---
     rating = Column(Integer, nullable=True) # 1 a 5 estrellas
     rating_comments = Column(String, nullable=True)
@@ -145,3 +153,4 @@ class TechnicianInvitation(Base):
     created_by_id = Column(Integer, ForeignKey("users.id"))
     
     created_by = relationship("User")
+

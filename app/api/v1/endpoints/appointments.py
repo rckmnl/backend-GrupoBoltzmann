@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, File, UploadFile, Form
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.session import get_db
 from app.models.models import ServiceAppointment, User, AppointmentStatus, UserRole, Device
@@ -15,7 +15,8 @@ class AppointmentCreate(BaseModel):
     requested_date: datetime
     service_type: str 
     priority: str = "medium"
-    notes: str = None
+    notes: Optional[str] = None
+    total_cost: float = 0.0
 
 @router.post("/")
 async def create_appointment(
@@ -36,9 +37,12 @@ async def create_appointment(
         service_type=data.service_type,
         priority=data.priority,
         notes=data.notes,
+        total_cost=data.total_cost,
         status=AppointmentStatus.PENDING
     )
     db.add(new_appo)
+    await db.flush() # Para obtener el ID
+
     await db.commit()
 
     # NOTIFICACIÓN A TÉCNICOS: Nuevo trabajo disponible
@@ -209,8 +213,10 @@ async def update_appointment_status(
         raise HTTPException(status_code=403, detail="No autorizado")
         
     # Lógica de asignación
-    if data.technician_id:
+    technician_changed = False
+    if data.technician_id and appo.technician_id != data.technician_id:
         appo.technician_id = data.technician_id
+        technician_changed = True
     
     if data.scheduled_date:
         # Normalizar a naive datetime para evitar errores con PostgreSQL TIMESTAMP WITHOUT TIME ZONE
@@ -228,29 +234,91 @@ async def update_appointment_status(
         appo.started_at = datetime.utcnow()  # Cuando inicia el trabajo
     elif data.status == AppointmentStatus.COMPLETED and not appo.completed_at:
         appo.completed_at = datetime.utcnow()  # Cuando finaliza
+        appo.status = AppointmentStatus.PENDING_PAYMENT # Cambiar automáticamente a esperando pago
     
     await db.commit()
 
-    # NOTIFICACIÓN AL CLIENTE: Trabajo completado (Invitar a calificar)
-    if data.status == AppointmentStatus.COMPLETED:
-        print(f"[DEBUG] Status changed to COMPLETED for appointment {appo.id}. Notifying client...")
+    # --- NOTIFICACIONES DE ASIGNACIÓN ---
+    if technician_changed:
+        from app.api.v1.notifications import send_push_notification
+        # 1. Notificar al Técnico
         try:
-            from app.api.v1.notifications import send_push_notification
-            # Obtener el cliente
+            res_tech = await db.execute(select(User).where(User.id == appo.technician_id))
+            tech_user = res_tech.scalars().first()
+            if tech_user and tech_user.push_token:
+                await send_push_notification(
+                    tokens=tech_user.push_token,
+                    title="🔧 Nuevo Servicio Asignado",
+                    body=f"El administrador te ha asignado un nuevo servicio de {appo.service_type}.",
+                    data={"appointment_id": appo.id, "type": "ASSIGNED_JOB"}
+                )
+        except Exception as e:
+            print(f"Error notifying technician (assigned): {e}")
+
+        # 2. Notificar al Cliente
+        try:
             res_client = await db.execute(select(User).where(User.id == appo.client_id))
             client_user = res_client.scalars().first()
             if client_user and client_user.push_token:
-                print(f"[DEBUG] Found client token: {client_user.push_token}. Sending notification...")
+                # Obtener nombre del técnico para personalizar el mensaje
+                tech_name = tech_user.full_name if tech_user else "un técnico"
+                await send_push_notification(
+                    tokens=client_user.push_token,
+                    title="✅ Técnico Asignado",
+                    body=f"Se ha asignado a {tech_name} para tu servicio de {appo.service_type}.",
+                    data={"appointment_id": appo.id, "type": "TECH_ASSIGNED"}
+                )
+        except Exception as e:
+            print(f"Error notifying client (tech_assigned): {e}")
+
+    # --- NOTIFICACIONES AL CLIENTE ---
+    from app.api.v1.notifications import send_push_notification
+    
+    # 1. Técnico ya va en camino (IN_PROGRESS)
+    if data.status == AppointmentStatus.IN_PROGRESS:
+        try:
+            res_client = await db.execute(select(User).where(User.id == appo.client_id))
+            client_user = res_client.scalars().first()
+            if client_user and client_user.push_token:
+                await send_push_notification(
+                    tokens=client_user.push_token,
+                    title="⚡ Servicio Iniciado",
+                    body=f"El técnico ha comenzado el trabajo de {appo.service_type} en tu equipo.",
+                    data={"appointment_id": appo.id, "type": "JOB_STARTED"}
+                )
+        except Exception as e:
+            print(f"Error notifying client (in_progress): {e}")
+
+    # 2. Trabajo completado -> Notificar Pago
+    elif data.status == AppointmentStatus.COMPLETED:
+        print(f"[DEBUG] Status changed to COMPLETED/PENDING_PAYMENT for appointment {appo.id}. Notifying client...")
+        try:
+            res_client = await db.execute(select(User).where(User.id == appo.client_id))
+            client_user = res_client.scalars().first()
+            if client_user and client_user.push_token:
                 await send_push_notification(
                     tokens=client_user.push_token,
                     title="🎉 ¡Trabajo Finalizado!",
-                    body=f"El servicio de {appo.service_type} ha concluido. Por favor, califica a tu técnico.",
-                    data={"appointment_id": appo.id, "type": "JOB_COMPLETED"}
+                    body=f"El servicio de {appo.service_type} ha concluido. Por favor, procede con el pago de ${appo.total_cost}.",
+                    data={"appointment_id": appo.id, "type": "PAYMENT_REQUIRED", "cost": appo.total_cost}
                 )
-            else:
-                print(f"[DEBUG] Client {appo.client_id} has no push token registered.")
         except Exception as e:
             print(f"Error notifying client (completed): {e}")
+
+    # 3. Pago validado -> Notificar Calificación
+    elif data.status == AppointmentStatus.PAID:
+        try:
+            res_client = await db.execute(select(User).where(User.id == appo.client_id))
+            client_user = res_client.scalars().first()
+            if client_user and client_user.push_token:
+                await send_push_notification(
+                    tokens=client_user.push_token,
+                    title="✅ Pago Verificado",
+                    body="Tu pago ha sido validado con éxito. Ya puedes calificar el servicio del técnico.",
+                    data={"appointment_id": appo.id, "type": "PAYMENT_VERIFIED"}
+                )
+        except Exception as e:
+            print(f"Error notifying client (paid): {e}")
 
     return {"status": "success", "new_status": data.status.value}
 
@@ -275,8 +343,8 @@ async def rate_service(
     if appo.client_id != current_user.id:
         raise HTTPException(status_code=403, detail="Solo el cliente que solicitó el servicio puede calificar")
         
-    if appo.status != AppointmentStatus.COMPLETED:
-        raise HTTPException(status_code=400, detail="Solo se pueden calificar trabajos finalizados")
+    if appo.status != AppointmentStatus.PAID:
+        raise HTTPException(status_code=400, detail="Solo se pueden calificar trabajos con pago verificado")
 
     if data.rating < 1 or data.rating > 5:
         raise HTTPException(status_code=400, detail="La calificación debe estar entre 1 y 5 estrellas")
@@ -331,3 +399,88 @@ async def accept_job(
         print(f"Error notifying client (accept_job): {e}")
 
     return {"status": "success", "message": "Trabajo aceptado correctamente"}
+@router.post("/{id}/report-payment")
+async def report_payment(
+    id: int,
+    payment_reference: str = Form(...),
+    screenshot: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """El cliente reporta su pago subiendo un capture."""
+    result = await db.execute(select(ServiceAppointment).where(ServiceAppointment.id == id))
+    appo = result.scalars().first()
+    
+    if not appo:
+        raise HTTPException(status_code=404, detail="Cita no encontrada")
+    
+    if appo.client_id != current_user.id:
+        raise HTTPException(status_code=403, detail="No autorizado")
+
+    # Guardar imagen
+    upload_dir = "static/uploads/payments"
+    import os, shutil
+    os.makedirs(upload_dir, exist_ok=True)
+    file_name = f"pay_{id}_{int(datetime.utcnow().timestamp())}_{screenshot.filename}"
+    file_path = os.path.join(upload_dir, file_name)
+    with open(file_path, "wb") as buffer:
+        shutil.copyfileobj(screenshot.file, buffer)
+    
+    appo.payment_reference = payment_reference
+    appo.payment_screenshot_url = f"/static/uploads/payments/{file_name}"
+    appo.status = AppointmentStatus.PAYMENT_VERIFYING
+    
+    await db.commit()
+
+    # NOTIFICAR ADMINS
+    try:
+        from app.api.v1.notifications import send_push_notification
+        admin_result = await db.execute(select(User.push_token).where(User.role == UserRole.ADMIN).where(User.push_token != None))
+        admin_tokens = admin_result.scalars().all()
+        if admin_tokens:
+            await send_push_notification(
+                tokens=list(admin_tokens),
+                title="💰 Nuevo Pago Reportado",
+                body=f"El cliente {current_user.full_name} reportó el pago por ${appo.total_cost}.",
+                data={"appointment_id": id, "type": "PAYMENT_REPORTED"}
+            )
+    except Exception as e:
+        print(f"Error notifying admins: {e}")
+
+    return {"status": "success", "message": "Pago reportado correctamente. Esperando validación."}
+
+@router.post("/{id}/verify-payment")
+async def verify_payment(
+    id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Admin valida el pago."""
+    if current_user.role != UserRole.ADMIN:
+        raise HTTPException(status_code=403, detail="Solo administradores pueden validar pagos")
+
+    result = await db.execute(select(ServiceAppointment).where(ServiceAppointment.id == id))
+    appo = result.scalars().first()
+    
+    if not appo:
+        raise HTTPException(status_code=404, detail="Cita no encontrada")
+    
+    appo.status = AppointmentStatus.PAID
+    await db.commit()
+
+    # NOTIFICACIÓN AL CLIENTE: Pago validado -> Notificar Calificación
+    try:
+        from app.api.v1.notifications import send_push_notification
+        res_client = await db.execute(select(User).where(User.id == appo.client_id))
+        client_user = res_client.scalars().first()
+        if client_user and client_user.push_token:
+            await send_push_notification(
+                tokens=client_user.push_token,
+                title="✅ Pago Verificado",
+                body="Tu pago ha sido validado con éxito. Ya puedes calificar el servicio del técnico.",
+                data={"appointment_id": appo.id, "type": "PAYMENT_VERIFIED"}
+            )
+    except Exception as e:
+        print(f"Error notifying client (verify_payment): {e}")
+    
+    return {"status": "success", "message": "Pago verificado correctamente"}

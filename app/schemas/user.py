@@ -8,17 +8,18 @@ class UserCreate(BaseModel):
     full_name: str
     organization_name: str # Para crear la organización al registrarse
     is_corporate: bool = False
-    phone: Optional[str] = None
+    phone_number: Optional[str] = None
     role: Optional[UserRole] = UserRole.CLIENT_RESIDENTIAL
 
 class UserOut(BaseModel):
     id: int
     email: EmailStr
     full_name: Optional[str]
-    phone: Optional[str] = None
+    phone_number: Optional[str] = None
     role: UserRole
     organization_id: Optional[int] = None
     push_token: Optional[str] = None
+    photo_url: Optional[str] = None
     
     class Config:
         from_attributes = True
@@ -37,3 +38,4 @@ class UserUpdate(BaseModel):
     email: Optional[str] = None
     role: Optional[UserRole] = None # Solo el Admin enviará esto
     push_token: Optional[str] = None
+    phone_number: Optional[str] = None

@@ -1,14 +1,17 @@
-from fastapi import APIRouter, Depends, HTTPException, status, File, UploadFile
+from fastapi import APIRouter, Depends, HTTPException, status, File, UploadFile, Request
+from fastapi.responses import HTMLResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
-from typing import List
+from typing import List, Optional
 from pydantic import BaseModel
 
 from app.db.session import get_db
 from app.models.models import User, UserRole, Organization
-from app.schemas.user import UserCreate, UserOut, UserUpdate
+from app.schemas.user import UserCreate, UserOut, UserUpdate, Token
 from app.api.auth_utils import get_current_user
-from app.core.security import get_password_hash
+from app.core.security import get_password_hash, create_access_token
+from app.core.config import settings
+from datetime import datetime, timedelta
 
 router = APIRouter()
 
@@ -56,6 +59,7 @@ async def create_technician(
         hashed_password=get_password_hash(user_data.password),
         full_name=user_data.full_name,
         organization_id=db_org.id, # <--- Usamos el ID dinámico
+        phone_number=user_data.phone_number,
         role=UserRole.TECHNICIAN
     )
     
@@ -84,6 +88,29 @@ async def list_all_users(
     
     result = await db.execute(select(User))
     return result.scalars().all()
+
+@router.patch("/me", response_model=UserOut)
+async def update_my_profile(
+    user_data: UserUpdate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Permite que el usuario actual actualice su propio perfil."""
+    # Solo permitir actualizar campos específicos si el usuario no es admin
+    # (Evitar que se cambie el rol a sí mismo si ya es admin, o que un no-admin se asigne rol)
+    data = user_data.model_dump(exclude_unset=True)
+    
+    # Si no es admin, eliminar campos sensibles
+    if current_user.role != UserRole.ADMIN:
+        data.pop("role", None)
+        data.pop("email", None) # No permitimos cambio de email por ahora para evitar problemas de login
+    
+    for key, value in data.items():
+        setattr(current_user, key, value)
+        
+    await db.commit()
+    await db.refresh(current_user)
+    return current_user
 
 @router.patch("/{user_id}", response_model=UserOut)
 async def update_user(
@@ -192,6 +219,7 @@ class InvitationResponse(BaseModel):
 @router.post("/invite", response_model=InvitationResponse)
 async def create_invitation(
     data: InvitationCreate,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
@@ -214,9 +242,10 @@ async def create_invitation(
     db.add(invitation)
     await db.commit()
     
-    # Construir link (el frontend lo mostrará al admin)
-    base_url = "boltzman://register-technician"
-    invitation_link = f"{base_url}?token={token}"
+    # Construir link HTTP que servirá como puente
+    # Detectamos el host dinámicamente desde la petición
+    host = request.headers.get("host", "localhost:8000")
+    invitation_link = f"http://{host}/users/invite/link/{token}"
     
     return {
         "invitation_link": invitation_link,
@@ -249,12 +278,58 @@ async def validate_invitation(
     
     return {"valid": True, "email": invitation.email}
 
+@router.get("/invite/link/{token}", response_class=HTMLResponse)
+async def bridge_invitation(token: str):
+    """Interfaz puente para abrir la app desde un link HTTP (cliqueable en WhatsApp/Email)"""
+    html_content = f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <title>Boltzmann - Registro de Técnico</title>
+        <style>
+            body {{ font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; text-align: center; padding: 40px 20px; background: #fdfcf0; color: #333; }}
+            .card {{ background: white; padding: 30px; border-radius: 24px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); max-width: 400px; margin: auto; border: 1px solid #eee; }}
+            .btn {{ display: block; background: #EC7324; color: white; padding: 18px 20px; border-radius: 16px; text-decoration: none; font-weight: bold; margin-top: 15px; font-size: 16px; box-shadow: 0 4px 15px rgba(236, 115, 36, 0.3); }}
+            .btn-expo {{ background: #000; color: white; margin-top: 10px; }}
+            .logo {{ font-size: 36px; font-weight: bold; color: #EC7324; margin-bottom: 10px; }}
+            p {{ color: #666; line-height: 1.5; font-size: 14px; }}
+            .divider {{ margin: 25px 0; border-top: 1px dashed #ccc; position: relative; }}
+            .divider span {{ position: absolute; top: -10px; background: white; padding: 0 10px; left: 50%; transform: translateX(-50%); font-size: 12px; color: #999; }}
+        </style>
+    </head>
+    <body>
+        <div class="card">
+            <div class="logo">🔧 Boltzmann</div>
+            <h2 style="margin-top:0">¡Bienvenido!</h2>
+            <p>Has sido invitado a unirte al equipo.</p>
+            
+            <a href="boltzman://register-technician?token={token}" class="btn">ABRIR APLICACIÓN</a>
+            
+            <div class="divider"><span>MODO PRUEBA (EXPO)</span></div>
+            
+            <p>Si estás probando con Expo Go, usa este botón:</p>
+            <a href="exp://192.168.1.107:8081/--/register-technician?token={token}" class="btn btn-expo">ABRIR EN EXPO GO</a>
+            
+            <p style="margin-top:30px; font-size: 11px; color: #999;">Si la aplicación no se abre, asegúrate de tenerla en ejecución en tu PC.</p>
+        </div>
+        
+        <script>
+            // No redirigimos automáticamente en modo puente para permitir elegir el método de apertura
+        </script>
+    </body>
+    </html>
+    """
+    return HTMLResponse(content=html_content)
+
 class TechnicianRegister(BaseModel):
     token: str
     full_name: str
     password: str
+    phone_number: Optional[str] = None
 
-@router.post("/register-technician")
+@router.post("/register-technician", response_model=Token)
 async def register_technician_with_invitation(
     data: TechnicianRegister,
     db: AsyncSession = Depends(get_db)
@@ -283,14 +358,25 @@ async def register_technician_with_invitation(
         hashed_password=get_password_hash(data.password),
         full_name=data.full_name,
         organization_id=1,  # Organización principal de Boltzman
+        phone_number=data.phone_number,
         role=UserRole.TECHNICIAN
     )
     db.add(new_technician)
-    
     # Marcar invitación como usada
     invitation.used = True
     
     await db.commit()
     await db.refresh(new_technician)
     
-    return {"status": "success", "message": "Técnico registrado correctamente", "user_id": new_technician.id}
+    # Generar token automáticamente después del registro
+    access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+    access_token = create_access_token(
+        data={"sub": new_technician.email, "role": new_technician.role.value}, 
+        expires_delta=access_token_expires
+    )
+    
+    return {
+        "access_token": access_token, 
+        "token_type": "bearer",
+        "user": new_technician
+    }

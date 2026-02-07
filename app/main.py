@@ -51,6 +51,7 @@ app = FastAPI(title="Grupo Boltzman API")
 os.makedirs("static", exist_ok=True)
 os.makedirs("static/uploads/devices", exist_ok=True)
 os.makedirs("static/uploads/maintenance", exist_ok=True)
+os.makedirs("static/uploads/payments", exist_ok=True)
 
 # Configuración de CORS para permitir conexiones desde el iPhone
 app.add_middleware(
@@ -144,6 +145,7 @@ async def register_user(
         hashed_password=get_password_hash(user_data.password),
         full_name=user_data.full_name,
         organization_id=org_id,
+        phone_number=user_data.phone_number,
         role=user_data.role if user_data.role else (UserRole.CLIENT_CORPORATE if user_data.is_corporate else UserRole.CLIENT_RESIDENTIAL)
     )
     db.add(new_user)
@@ -229,21 +231,21 @@ async def forgot_password(
     await db.commit()
     
     # 4. Enviar Email
-    sendgrid_api_key = os.getenv("SENDGRID_API_KEY")
+    smtp_email = os.getenv("SMTP_EMAIL", "noreply@boltzman.com")
+    smtp_password = os.getenv("SMTP_PASSWORD")
 
-    if sendgrid_api_key:
+    if smtp_email and smtp_password:
         try:
-            import requests
-            
-            email_data = {
-                "personalizations": [{
-                    "to": [{"email": data.email}],
-                    "subject": "Recuperación de Contraseña - Boltzman"
-                }],
-                "from": {"email": os.getenv("SMTP_EMAIL", "noreply@boltzman.com")},
-                "content": [{
-                    "type": "text/plain",
-                    "value": f"""
+            import smtplib
+            from email.mime.text import MIMEText
+            from email.mime.multipart import MIMEMultipart
+
+            msg = MIMEMultipart("alternative")
+            msg["Subject"] = "Recuperación de Contraseña - Boltzman"
+            msg["From"] = smtp_email
+            msg["To"] = data.email
+
+            html = f"""
             <html>
                 <body>
                     <div style="font-family: sans-serif; padding: 20px;">
@@ -256,27 +258,18 @@ async def forgot_password(
                     </div>
                 </body>
             </html>
-        """
-                }]
-            }
+            """
+            msg.attach(MIMEText(html, "html"))
+
+            # Gmail SMTP config
+            with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
+                server.login(smtp_email, smtp_password)
+                server.sendmail(smtp_email, data.email, msg.as_string())
             
-            response = requests.post(
-                "https://api.sendgrid.com/v3/mail/send",
-                headers={
-                    "Authorization": f"Bearer {sendgrid_api_key}",
-                    "Content-Type": "application/json"
-                },
-                json=email_data
-            )
-            
-            if response.status_code == 202:
-                print(f"[INFO] Email enviado correctamente a {data.email} via SendGrid")
-            else:
-                print(f"[ERROR] SendGrid error: {response.status_code} - {response.text}")
-                raise Exception(f"SendGrid error: {response.status_code}")
+            print(f"[INFO] Email enviado correctamente a {data.email} via Gmail SMTP")
                 
         except Exception as e:
-            print(f"[ERROR] Falló el envío de email: {e}")
+            print(f"[ERROR] Falló el envío de email SMTP: {e}")
             # Fallback a consola
             print(f"\n" + "="*50)
             print(f"📧 [MOCK EMAIL] To: {data.email}")
@@ -334,7 +327,7 @@ app.include_router(users.router, prefix="/users", tags=["Gestión de Usuarios"])
 app.include_router(devices.router, prefix="/devices", tags=["Equipos AC"])
 app.include_router(organizations.router, prefix="/organizations", tags=["Organizaciones"])
 app.include_router(maintenance.router, prefix="/maintenance", tags=["Mantenimiento"])
-app.include_router(appointments.router, prefix="/appointments", tags=["Agendamiento"])
+app.include_router(appointments.router, prefix="/appointments", tags=["Appointments"])
 app.include_router(appointments.router, prefix="/jobs", tags=["Trabajos"]) # Alias para mayor facilidad
 
 # Servir la carpeta static para que las fotos sean accesibles vía URL
