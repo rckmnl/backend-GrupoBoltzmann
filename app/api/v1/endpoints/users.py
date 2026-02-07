@@ -242,10 +242,10 @@ async def create_invitation(
     db.add(invitation)
     await db.commit()
     
-    # Construir link HTTP que servirá como puente
-    # Detectamos el host dinámicamente desde la petición
-    host = request.headers.get("host", "localhost:8000")
-    invitation_link = f"http://{host}/users/invite/link/{token}"
+    # Construir link HTTP que servirá como puente hacia la app
+    host = request.headers.get("host", "boltzman-backend-94r7.onrender.com")
+    protocol = "https" if "render" in host else "http"
+    invitation_link = f"{protocol}://{host}/users/invite/link/{token}"
     
     return {
         "invitation_link": invitation_link,
@@ -305,12 +305,26 @@ async def bridge_invitation(token: str):
             <h2 style="margin-top:0">¡Bienvenido!</h2>
             <p>Has sido invitado a unirte al equipo.</p>
             
-            <a href="boltzman://register-technician?token={token}" class="btn">ABRIR APLICACIÓN</a>
+            <a href="boltzman://register-technician?token={token}" class="btn">ABRIR APLICACIÓN (APK/IPA)</a>
             
-            <p style="margin-top:30px; font-size: 11px; color: #999;">Si la aplicación no se abre, asegúrate de tenerla instalada.</p>
+            <div class="divider"><span>MODO PRUEBA (EXPO GO)</span></div>
+            
+            <p>Si usas <strong>Expo Go</strong>, ingresa la IP de tu PC para abrir el link:</p>
+            <div style="display:flex; gap:10px; margin: 10px 0;">
+                <input type="text" id="expo-ip" value="192.168.0.110" style="flex:1; padding:10px; border-radius:10px; border:1px solid #ddd;">
+                <button onclick="openExpo()" style="background:#000; color:white; border:none; padding:10px; border-radius:10px; cursor:pointer;">IR</button>
+            </div>
+            
+            <p style="margin-top:20px; font-size: 11px; color: #999;">Nota: Boltzman:// requiere tener instalada la aplicación compilada (APK).</p>
         </div>
         
         <script>
+            function openExpo() {{
+                const ip = document.getElementById('expo-ip').value;
+                if (!ip) return alert("Ingresa una IP");
+                window.location.href = `exp://${{ip}}:8081/--/register-technician?token={token}`;
+            }}
+        </script>
             // No redirigimos automáticamente en modo puente para permitir elegir el método de apertura
         </script>
     </body>

@@ -185,8 +185,8 @@ async def get_device_qr(
     if not db_device:
         raise HTTPException(status_code=404, detail="Equipo no encontrado")
 
-    # Updated to use Deep Linking Scheme
-    qr_data = f"boltzman://device/{device_id}"
+    # Updated to use the Public Web bridge on Render
+    qr_data = f"https://boltzman-backend-94r7.onrender.com/devices/verify/{device_id}"
 
     qr = qrcode.QRCode(version=1, box_size=10, border=5)
     qr.add_data(qr_data)
