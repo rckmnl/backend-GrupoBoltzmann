@@ -209,8 +209,7 @@ async def get_device_label(
     if not db_device:
         raise HTTPException(status_code=404, detail="Equipo no encontrado")
 
-    mi_ip = "192.168.0.110"
-    image_display = f'<img src="http://{mi_ip}:8000{db_device.image_url}" style="width:120px; height:120px; object-fit:cover; border-radius:10px;">' if db_device.image_url else '<div style="width:120px; height:120px; background:#eee; border-radius:10px; display:flex; align-items:center; justify-center; font-size:10px; color:#999;">SIN FOTO</div>'
+    image_display = f'<img src="{db_device.image_url}" style="width:120px; height:120px; object-fit:cover; border-radius:10px;">' if db_device.image_url else '<div style="width:120px; height:120px; background:#eee; border-radius:10px; display:flex; align-items:center; justify-center; font-size:10px; color:#999;">SIN FOTO</div>'
 
     return f"""
     <html>
@@ -304,8 +303,7 @@ async def verify_device_page(device_id: int, db: AsyncSession = Depends(get_db))
     # El token se verificará vía frontend (LocalStorage) y se enviará en las peticiones subsiguientes.
     # Por ahora el HTML base permite ver el equipo pero bloquea el "Detalle Profundo" si no hay sesión.
     
-    mi_ip = "192.168.0.110"
-    device_image_tag = f'<img src="http://{mi_ip}:8000{db_device.image_url}" style="width:100px; height:100px; object-fit:cover; border-radius:10px; margin-bottom:10px;">' if db_device.image_url else ""
+    device_image_tag = f'<img src="{db_device.image_url}" style="width:100px; height:100px; object-fit:cover; border-radius:10px; margin-bottom:10px;">' if db_device.image_url else ""
 
     # 2. Generar el HTML del Historial con soporte para FOTOS
     history_html = ""

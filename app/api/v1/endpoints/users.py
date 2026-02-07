@@ -307,12 +307,7 @@ async def bridge_invitation(token: str):
             
             <a href="boltzman://register-technician?token={token}" class="btn">ABRIR APLICACIÓN</a>
             
-            <div class="divider"><span>MODO PRUEBA (EXPO)</span></div>
-            
-            <p>Si estás probando con Expo Go, usa este botón:</p>
-            <a href="exp://192.168.1.107:8081/--/register-technician?token={token}" class="btn btn-expo">ABRIR EN EXPO GO</a>
-            
-            <p style="margin-top:30px; font-size: 11px; color: #999;">Si la aplicación no se abre, asegúrate de tenerla en ejecución en tu PC.</p>
+            <p style="margin-top:30px; font-size: 11px; color: #999;">Si la aplicación no se abre, asegúrate de tenerla instalada.</p>
         </div>
         
         <script>

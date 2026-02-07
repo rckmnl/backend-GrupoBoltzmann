@@ -74,35 +74,92 @@ async def startup():
 async def read_root():
     return {"status": "success", "message": "Backend de Boltzman funcionando"}
 
-# --- FIX TEMPORAL: Endpoint para resetear contraseña del Admin DESDE el servidor ---
-@app.get("/fix-admin")
-async def fix_admin_password(db: AsyncSession = Depends(get_db)):
+# --- ENDPOINT DE MANTENIMIENTO Y MIGRACIÓN (PRÓXIMAMENTE USAR ALEMBIC) ---
+@app.get("/fix-production")
+async def fix_production_environment(db: AsyncSession = Depends(get_db)):
     """
-    Ruta de emergencia para resetear la contraseña de jefe@jefe.com a '123456'
-    usando el entorno de hashing del servidor (Render).
+    Ruta de emergencia para:
+    1. Aplicar cambios de esquema manuales (ALTER TABLE).
+    2. Asegurar que el usuario Admin existe y tiene los permisos correctos.
+    3. Actualizar los ENUMs de la base de datos.
     """
-    email_target = "jefe@jefe.com"
-    new_password = "123456"
+    results = []
     
-    # Buscar usuario
-    result = await db.execute(select(User).where(User.email == email_target))
-    user = result.scalars().first()
+    # 1. ACTUALIZAR ENUM DE ESTADOS
+    print("[MIGRATION] Updating AppointmentStatus Enum...")
+    new_statuses = ["pending_payment", "payment_verifying", "paid", "cancelled"]
+    for status_val in new_statuses:
+        try:
+            # Usamos ejecución directa de texto para ALTER TYPE
+            await db.execute(text(f"ALTER TYPE appointmentstatus ADD VALUE '{status_val}';"))
+            await db.commit()
+            results.append(f"✅ Estado '{status_val}' añadido al ENUM.")
+        except Exception as e:
+            await db.rollback()
+            results.append(f"ℹ️ Estado '{status_val}' ya existe o no se pudo añadir.")
+
+    # 2. AÑADIR COLUMNAS FALTANTES A SERVICE_APPOINTMENTS
+    print("[MIGRATION] Adding columns to service_appointments...")
+    columns_to_add = [
+        ("total_cost", "FLOAT DEFAULT 0.0"),
+        ("payment_reference", "VARCHAR"),
+        ("payment_screenshot_url", "VARCHAR"),
+        ("rating", "INTEGER"),
+        ("rating_comments", "VARCHAR")
+    ]
     
-    if not user:
-        return {"error": f"Usuario {email_target} no encontrado"}
+    for col_name, col_type in columns_to_add:
+        try:
+            await db.execute(text(f"ALTER TABLE service_appointments ADD COLUMN {col_name} {col_type};"))
+            await db.commit()
+            results.append(f"✅ Columna '{col_name}' añadida.")
+        except Exception as e:
+            await db.rollback()
+            results.append(f"ℹ️ Columna '{col_name}' ya existe o error.")
+
+    # 3. ASEGURAR USUARIO ADMINISTRADOR
+    email_admin = "jefe@jefe.com"
+    pass_admin = "123456"
     
-    # Generar hash AQUÍ (en el servidor)
-    new_hash = get_password_hash(new_password)
-    user.hashed_password = new_hash
+    result = await db.execute(select(User).where(User.email == email_admin))
+    admin_user = result.scalars().first()
+    
+    if not admin_user:
+        # Crear si no existe
+        from app.models.models import Organization
+        # Buscar org principal
+        org_res = await db.execute(select(Organization).where(Organization.id == 1))
+        org = org_res.scalars().first()
+        if not org:
+            org = Organization(id=1, name="Boltzman Services", is_corporate=True)
+            db.add(org)
+            await db.flush()
+        
+        admin_user = User(
+            email=email_admin,
+            hashed_password=get_password_hash(pass_admin),
+            full_name="Administrador Boltzman",
+            role=UserRole.ADMIN,
+            organization_id=org.id
+        )
+        db.add(admin_user)
+        results.append(f"🚀 Usuario '{email_admin}' CREADO como Admin.")
+    else:
+        # Asegurar rol y contraseña
+        admin_user.role = UserRole.ADMIN
+        admin_user.hashed_password = get_password_hash(pass_admin)
+        results.append(f"🔧 Usuario '{email_admin}' ACTUALIZADO (Rol Admin y Pass '123456').")
     
     await db.commit()
-    await db.refresh(user)
     
     return {
-        "status": "FIXED",
-        "message": f"Contraseña de {email_target} reseteada a '{new_password}'",
-        "new_hash_start": new_hash[:10] + "..."
+        "status": "MIGRATION_FINISHED",
+        "results": results,
+        "note": "Por seguridad, esta ruta debería ser eliminada después de su uso en producción."
     }
+
+# También necesitamos importar 'text' de sqlalchemy
+from sqlalchemy import text
 
 # 4. RUTAS DE AUTENTICACIÓN (REGISTRO Y LOGIN)
 
