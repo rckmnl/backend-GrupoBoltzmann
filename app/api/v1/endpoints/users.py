@@ -325,8 +325,6 @@ async def bridge_invitation(token: str):
                 window.location.href = `exp://${{ip}}:8081/--/register-technician?token={token}`;
             }}
         </script>
-            // No redirigimos automáticamente en modo puente para permitir elegir el método de apertura
-        </script>
     </body>
     </html>
     """
