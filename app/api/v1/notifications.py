@@ -32,24 +32,29 @@ async def send_push_notification(
     if expo_tokens:
         try:
             print(f"[INFO] Enviando {len(expo_tokens)} notificaciones via Expo...")
+            print(f"[DEBUG] Tokens: {expo_tokens}")
             expo_url = "https://exp.host/--/api/v2/push/send"
             messages = []
             for token in expo_tokens:
-                messages.append({
+                msg_payload = {
                     "to": token,
                     "title": title,
                     "body": body,
                     "data": data or {},
                     "sound": "default"
-                })
+                }
+                messages.append(msg_payload)
             
-            response = requests.post(expo_url, json=messages)
+            print(f"[DEBUG] Expo Payload: {messages}")
+            response = requests.post(expo_url, json=messages, timeout=10)
+            
             if response.status_code == 200:
-                print(f"[SUCCESS] Notificaciones Expo enviadas: {response.text}")
+                resp_json = response.json()
+                print(f"[SUCCESS] Respuesta Expo: {resp_json}")
             else:
                 print(f"[ERROR] Expo API error: {response.status_code} - {response.text}")
         except Exception as e:
-            print(f"[ERROR] Fallo al enviar via Expo: {e}")
+            print(f"[ERROR] Fallo crítico al enviar via Expo: {e}")
 
     # 2. ENVIAR VIA FIREBASE (Original)
     if native_tokens:
