@@ -300,5 +300,5 @@ app.include_router(maintenance.router, prefix="/maintenance", tags=["Mantenimien
 app.include_router(appointments.router, prefix="/appointments", tags=["Appointments"])
 app.include_router(appointments.router, prefix="/jobs", tags=["Trabajos"]) # Alias para mayor facilidad
 
-# Servir la carpeta static para que las fotos sean accesibles vía URL
+# Servir la carpeta static para que las fotos sean accesibles vía 
 app.mount("/static", StaticFiles(directory="static"), name="static")
