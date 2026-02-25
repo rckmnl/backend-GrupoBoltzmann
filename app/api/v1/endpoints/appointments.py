@@ -112,6 +112,39 @@ async def get_technician_jobs(
 class TimerUpdate(BaseModel):
     action: str # "start_travel" | "arrive"
 
+@router.get("/finance/pending")
+async def get_pending_payments(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Lista de trabajos que requieren pago o verificación (Solo Admins)."""
+    if current_user.role != UserRole.ADMIN:
+        raise HTTPException(status_code=403, detail="No autorizado")
+    
+    from sqlalchemy import cast, String, or_
+    from sqlalchemy.orm import selectinload
+    
+    # Buscamos estados que indiquen que el trabajo terminó pero el pago está pendiente o en curso
+    # Usamos comparación de strings para ser más robustos ante variaciones de mayúsculas/minúsculas en DB
+    target_statuses = [
+        "pending_payment", "PENDING_PAYMENT",
+        "payment_verifying", "PAYMENT_VERIFYING",
+        "completed", "COMPLETED" # Por si acaso quedaron algunos en completed sin transicionar
+    ]
+    
+    query = select(ServiceAppointment).options(
+        selectinload(ServiceAppointment.device).selectinload(Device.owner)
+    ).where(
+        or_(*(cast(ServiceAppointment.status, String).ilike(s) for s in target_statuses))
+    ).order_by(ServiceAppointment.requested_date.desc())
+    
+    result = await db.execute(query)
+    appointments = result.scalars().all()
+    
+    # Cargar relaciones manualmente si es necesario (para evitar errores de lazy loading)
+    # Aunque async session suele requerir esto si no está en el query
+    return appointments
+
 @router.patch("/{id}/timer")
 async def update_job_timer(
     id: int,
@@ -188,6 +221,14 @@ async def get_appointment_by_id(
     appo = result.scalars().first()
     if not appo:
         raise HTTPException(status_code=404, detail="Cita no encontrada")
+
+    # --- PROTECCIÓN DE DATOS FINANCIEROS ---
+    if current_user.role == UserRole.TECHNICIAN:
+        # Usamos 0.0 en lugar de None para evitar que el frontend explote si hace .toFixed()
+        appo.total_cost = 0.0
+        appo.payment_reference = "PROTECTED"
+        appo.payment_screenshot_url = None
+        
     return appo
 
 class AppointmentStatusUpdate(BaseModel):
@@ -232,9 +273,10 @@ async def update_appointment_status(
         appo.accepted_at = datetime.utcnow()  # Cuando se programa (técnico asignado)
     elif data.status == AppointmentStatus.IN_PROGRESS and not appo.started_at:
         appo.started_at = datetime.utcnow()  # Cuando inicia el trabajo
-    elif data.status == AppointmentStatus.COMPLETED and not appo.completed_at:
-        appo.completed_at = datetime.utcnow()  # Cuando finaliza
-        appo.status = AppointmentStatus.PENDING_PAYMENT # Cambiar automáticamente a esperando pago
+    elif data.status == AppointmentStatus.COMPLETED:
+        if not appo.completed_at:
+            appo.completed_at = datetime.utcnow()  # Cuando finaliza
+        appo.status = AppointmentStatus.PENDING_PAYMENT # Asegurar que siempre pase a esperando pago
     
     await db.commit()
 
