@@ -290,40 +290,37 @@ async def bridge_invitation(token: str):
         <title>Boltzmann - Registro de Técnico</title>
         <style>
             body {{ font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; text-align: center; padding: 40px 20px; background: #fdfcf0; color: #333; }}
-            .card {{ background: white; padding: 30px; border-radius: 24px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); max-width: 400px; margin: auto; border: 1px solid #eee; }}
-            .btn {{ display: block; background: #EC7324; color: white; padding: 18px 20px; border-radius: 16px; text-decoration: none; font-weight: bold; margin-top: 15px; font-size: 16px; box-shadow: 0 4px 15px rgba(236, 115, 36, 0.3); }}
-            .btn-expo {{ background: #000; color: white; margin-top: 10px; }}
-            .logo {{ font-size: 36px; font-weight: bold; color: #EC7324; margin-bottom: 10px; }}
-            p {{ color: #666; line-height: 1.5; font-size: 14px; }}
-            .divider {{ margin: 25px 0; border-top: 1px dashed #ccc; position: relative; }}
-            .divider span {{ position: absolute; top: -10px; background: white; padding: 0 10px; left: 50%; transform: translateX(-50%); font-size: 12px; color: #999; }}
+            .card {{ background: white; padding: 40px 30px; border-radius: 32px; box-shadow: 0 10px 30px rgba(0,0,0,0.08); max-width: 400px; margin: auto; border: 1px solid #eee; }}
+            .btn {{ display: block; background: #EC7324; color: white; padding: 20px 20px; border-radius: 18px; text-decoration: none; font-weight: bold; margin-top: 25px; font-size: 18px; box-shadow: 0 8px 20px rgba(236, 115, 36, 0.3); }}
+            .logo {{ font-size: 42px; font-weight: bold; color: #EC7324; margin-bottom: 15px; }}
+            p {{ color: #555; line-height: 1.6; font-size: 16px; margin-bottom: 20px; }}
+            .secondary-text {{ margin-top: 30px; font-size: 13px; color: #888; background: #f9f9f9; padding: 15px; border-radius: 12px; border: 1px solid #f0f0f0; }}
+            .loading-text {{ font-size: 14px; color: #EC7324; margin-top: 10px; font-weight: 500; }}
         </style>
     </head>
     <body>
         <div class="card">
-            <div class="logo">🔧 Boltzmann</div>
+            <div class="logo">🛠️ Boltzmann</div>
             <h2 style="margin-top:0">¡Bienvenido!</h2>
-            <p>Has sido invitado a unirte al equipo.</p>
+            <p>Has sido invitado a unirte al equipo técnico. Haz clic abajo para completar tu registro.</p>
             
-            <a href="boltzman://register-technician?token={token}" class="btn">ABRIR APLICACIÓN (APK/IPA)</a>
+            <a href="boltzman://register-technician?token={token}" id="open-btn" class="btn">ABRIR APLICACIÓN</a>
+            <div id="status" class="loading-text">Redirigiendo...</div>
             
-            <div class="divider"><span>MODO PRUEBA (EXPO GO)</span></div>
-            
-            <p>Si usas <strong>Expo Go</strong>, ingresa la IP de tu PC para abrir el link:</p>
-            <div style="display:flex; gap:10px; margin: 10px 0;">
-                <input type="text" id="expo-ip" value="192.168.0.110" style="flex:1; padding:10px; border-radius:10px; border:1px solid #ddd;">
-                <button onclick="openExpo()" style="background:#000; color:white; border:none; padding:10px; border-radius:10px; cursor:pointer;">IR</button>
+            <div class="secondary-text">
+                <strong>¿No se abrió la app?</strong><br>
+                Asegúrate de tener instalada la última versión del APK de Boltzmann en tu dispositivo para poder registrarte.
             </div>
-            
-            <p style="margin-top:20px; font-size: 11px; color: #999;">Nota: Boltzman:// requiere tener instalada la aplicación compilada (APK).</p>
         </div>
         
         <script>
-            function openExpo() {{
-                const ip = document.getElementById('expo-ip').value;
-                if (!ip) return alert("Ingresa una IP");
-                window.location.href = `exp://${{ip}}:8081/--/register-technician?token={token}`;
-            }}
+            // Intentar abrir automáticamente al cargar
+            window.onload = function() {{
+                setTimeout(function() {{
+                    window.location.href = "boltzman://register-technician?token={token}";
+                    document.getElementById('status').innerText = "Si no has sido redirigido, haz clic en el botón naranja.";
+                }}, 1000);
+            }};
         </script>
     </body>
     </html>
