@@ -12,11 +12,7 @@ load_dotenv()
 if os.name == 'nt':
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
-DATABASE_URL = os.getenv("DATABASE_URL")
-
-if not DATABASE_URL:
-    print("❌ Error: No se encontró DATABASE_URL en el archivo .env")
-    exit(1)
+DATABASE_URL = "postgresql://boltzman_db_user:M8kjsyKFYGVY3bNRFyzRPFiQStaGURV1@dpg-d5ik0dh5pdvs73c3skg0-a.oregon-postgres.render.com/boltzman_db"
 
 if DATABASE_URL.startswith("postgres://"):
     DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql+asyncpg://", 1)
@@ -32,10 +28,7 @@ async def check_tokens():
         users = result.scalars().all()
         print(f"\n--- USUARIOS CON PUSH TOKEN ({len(users)}) ---")
         for u in users:
-            print(f"User: {u.email} | Role: {u.role} | Token: {u.push_token}")
-        
-        if not users:
-            print("No se encontraron usuarios con token registrado.")
+            print(f"User: {u.email} | Role: {u.role} | Token: {u.push_token[:20]}...")
 
 if __name__ == "__main__":
     asyncio.run(check_tokens())

@@ -96,14 +96,6 @@ class AppointmentStatus(enum.Enum):
     PAID = "paid"                # Pago validado por Admin
     CANCELLED = "cancelled"
 
-    @classmethod
-    def _missing_(cls, value):
-        if isinstance(value, str):
-            for member in cls:
-                if member.value.lower() == value.lower():
-                    return member
-        return None
-
 class ServiceAppointment(Base):
     __tablename__ = "service_appointments"
     

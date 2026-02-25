@@ -289,45 +289,46 @@ async def bridge_invitation(token: str):
         <meta name="viewport" content="width=device-width, initial-scale=1">
         <title>Boltzmann - Registro de Técnico</title>
         <style>
-            body {{ font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; text-align: center; padding: 60px 20px; background: #fafafa; color: #333; margin: 0; }}
-            .container {{ display: flex; align-items: center; justify-content: center; min-height: 100vh; }}
-            .card {{ background: white; padding: 40px; border-radius: 32px; box-shadow: 0 10px 30px rgba(0,0,0,0.05); max-width: 420px; width: 100%; border: 1px solid #f0f0f0; }}
-            .logo {{ font-size: 42px; font-weight: bold; color: #EC7324; margin-bottom: 8px; }}
-            .status-tag {{ background: #fff7ed; color: #ea580c; display: inline-block; padding: 6px 16px; border-radius: 100px; font-size: 13px; font-weight: 600; margin-bottom: 24px; border: 1px solid #ffedd5; }}
-            h2 {{ margin-top: 0; font-size: 24px; color: #111; }}
-            p {{ color: #666; line-height: 1.6; font-size: 15px; margin-bottom: 30px; }}
-            .btn {{ display: block; background: #EC7324; color: white; padding: 20px 24px; border-radius: 18px; text-decoration: none; font-weight: 700; font-size: 17px; box-shadow: 0 8px 20px rgba(236, 115, 36, 0.25); transition: transform 0.2s; }}
-            .btn:active {{ transform: scale(0.98); }}
-            .footer {{ margin-top: 35px; font-size: 12px; color: #999; border-top: 1px solid #f0f0f0; padding-top: 20px; }}
-            .download-link {{ color: #EC7324; text-decoration: none; font-weight: 600; }}
+            body {{ font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; text-align: center; padding: 40px 20px; background: #fdfcf0; color: #333; }}
+            .card {{ background: white; padding: 30px; border-radius: 24px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); max-width: 400px; margin: auto; border: 1px solid #eee; }}
+            .btn {{ display: block; background: #EC7324; color: white; padding: 18px 20px; border-radius: 16px; text-decoration: none; font-weight: bold; margin-top: 15px; font-size: 16px; box-shadow: 0 4px 15px rgba(236, 115, 36, 0.3); }}
+            .btn-expo {{ background: #000; color: white; margin-top: 10px; }}
+            .logo {{ font-size: 36px; font-weight: bold; color: #EC7324; margin-bottom: 10px; }}
+            p {{ color: #666; line-height: 1.5; font-size: 14px; }}
+            .divider {{ margin: 25px 0; border-top: 1px dashed #ccc; position: relative; }}
+            .divider span {{ position: absolute; top: -10px; background: white; padding: 0 10px; left: 50%; transform: translateX(-50%); font-size: 12px; color: #999; }}
         </style>
     </head>
     <body>
-        <div class="container">
-            <div class="card">
-                <div class="logo">🔧 Boltzmann</div>
-                <div class="status-tag">Invitación de Técnico</div>
-                <h2>¡Casi listo!</h2>
-                <p>Para completar tu registro, necesitas abrir este enlace en la aplicación oficial de Boltzmann.</p>
-                
-                <a href="boltzman://register-technician?token={token}" class="btn">ABRIR EN LA APLICACIÓN</a>
-                
-                <div class="footer">
-                    <p>¿No tienes la app? <a href="#" class="download-link">Descarga el APK aquí</a></p>
-                    <p style="font-size: 11px;">Nota: Solo compatible con Android. Este enlace expira pronto.</p>
-                </div>
+        <div class="card">
+            <div class="logo">🔧 Boltzmann</div>
+            <h2 style="margin-top:0">¡Bienvenido!</h2>
+            <p>Has sido invitado a unirte al equipo.</p>
+            
+            <a href="boltzman://register-technician?token={token}" class="btn">ABRIR APLICACIÓN (APK/IPA)</a>
+            
+            <div class="divider"><span>MODO PRUEBA (EXPO GO)</span></div>
+            
+            <p>Si usas <strong>Expo Go</strong>, ingresa la IP de tu PC para abrir el link:</p>
+            <div style="display:flex; gap:10px; margin: 10px 0;">
+                <input type="text" id="expo-ip" value="192.168.0.110" style="flex:1; padding:10px; border-radius:10px; border:1px solid #ddd;">
+                <button onclick="openExpo()" style="background:#000; color:white; border:none; padding:10px; border-radius:10px; cursor:pointer;">IR</button>
             </div>
+            
+            <p style="margin-top:20px; font-size: 11px; color: #999;">Nota: Boltzman:// requiere tener instalada la aplicación compilada (APK).</p>
         </div>
+        
         <script>
-            // Intentar redirección automática inmediata
-            window.location.href = "boltzman://register-technician?token={token}";
+            function openExpo() {{
+                const ip = document.getElementById('expo-ip').value;
+                if (!ip) return alert("Ingresa una IP");
+                window.location.href = `exp://${{ip}}:8081/--/register-technician?token={token}`;
+            }}
         </script>
     </body>
     </html>
     """
     return HTMLResponse(content=html_content)
-
-
 
 class TechnicianRegister(BaseModel):
     token: str

@@ -1,11 +1,10 @@
 import asyncio
 import sys
 import os
-from sqlalchemy import text
 from sqlalchemy.future import select
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
-from app.models.models import Base, User, UserRole, Organization
+from app.models.models import User, UserRole, Organization
 from app.core.security import get_password_hash
 from dotenv import load_dotenv
 
@@ -16,11 +15,8 @@ load_dotenv()
 if os.name == 'nt':
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
-DATABASE_URL = os.getenv("DATABASE_URL")
-
-if not DATABASE_URL:
-    print("❌ Error: No se encontró DATABASE_URL en el archivo .env")
-    sys.exit(1)
+# URL de la base de datos de Render
+DATABASE_URL = "postgresql://boltzman_db_user:M8kjsyKFYGVY3bNRFyzRPFiQStaGURV1@dpg-d5ik0dh5pdvs73c3skg0-a.oregon-postgres.render.com/boltzman_db"
 
 # Fix para asyncpg
 if DATABASE_URL.startswith("postgres://"):
@@ -28,79 +24,58 @@ if DATABASE_URL.startswith("postgres://"):
 elif DATABASE_URL.startswith("postgresql://") and "+asyncpg" not in DATABASE_URL:
     DATABASE_URL = DATABASE_URL.replace("postgresql://", "postgresql+asyncpg://", 1)
 
-async def super_setup():
-    print(f"\n--- 🚀 INICIANDO SETUP PROFUNDO EN RENDER ---")
-    
-    # Motor con AUTOCOMMIT para migraciones de esquemas
-    engine = create_async_engine(DATABASE_URL, isolation_level="AUTOCOMMIT")
-    
-    # 1. CREACIÓN DE TABLAS (IMPORTANTE SI LA BD ESTÁ VACÍA)
-    print("\n[1/4] Creando tablas en la base de datos...")
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-        print("   ✅ Tablas creadas (u omitidas si ya existían).")
+engine = create_async_engine(DATABASE_URL)
+AsyncSessionLocal = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
-    # 2. FIX DE ENUMS (MAYÚSCULAS)
-    print("\n[2/4] Sincronizando estados (Enums)...")
-    uppercase_labels = [
-        "PENDING", "SCHEDULED", "IN_PROGRESS", "COMPLETED", 
-        "PENDING_PAYMENT", "PAYMENT_VERIFYING", "PAID", "CANCELLED"
-    ]
-    
-    async with engine.connect() as conn:
-        for label in uppercase_labels:
-            try:
-                await conn.execution_options(isolation_level="AUTOCOMMIT").execute(
-                    text(f"ALTER TYPE appointmentstatus ADD VALUE '{label}';")
-                )
-                print(f"   ✅ Agregado al Enum: {label}")
-            except Exception:
-                print(f"   ℹ️  {label} ya existe en el Enum.")
+async def create_jefe():
+    admin_email = "jefe@jefe.com"
+    admin_pass = "123456"
+    admin_name = "Administrador Boltzman"
 
-    # 3. CREACIÓN DE DATOS
-    AsyncSessionLocal = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
-    
+    print(f"\n--- 🛡️  REGISTRANDO ADMIN: {admin_email} 🛡️  ---")
+
     async with AsyncSessionLocal() as db:
-        print("\n[3/4] Asegurando Organización ID 1...")
+        # 1. Verificar si ya existe
+        result = await db.execute(select(User).where(User.email == admin_email))
+        existing_user = result.scalars().first()
+        
+        if existing_user:
+            print(f"🔧 Usuario {admin_email} ya existe. Actualizando rol y contraseña...")
+            existing_user.role = UserRole.ADMIN
+            existing_user.hashed_password = get_password_hash(admin_pass)
+            await db.commit()
+            print(f"✅ Usuario {admin_email} actualizado como ADMIN con contraseña '{admin_pass}'.")
+            return
+
+        # 2. Verificar/Crear Organización Madre (ID 1)
         result_org = await db.execute(select(Organization).where(Organization.id == 1))
         org = result_org.scalars().first()
         
         if not org:
-            org = Organization(id=1, name="Boltzman Services", is_corporate=True)
-            db.add(org)
+            print("⚠️ Creando Organización ID 1...")
+            new_org = Organization(id=1, name="Boltzman HQ", is_corporate=True)
+            db.add(new_org)
             await db.flush()
-            print("   ✅ Organización Boltzman creada.")
+            org_id = 1
         else:
-            print("   ℹ️  Organización ya existe.")
+            org_id = org.id
 
-        print("\n[4/4] Asegurando Usuario Administrador...")
-        admin_email = "jefe@jefe.com"
-        admin_pass = "123456"
+        # 3. Crear Admin
+        hashed_pw = get_password_hash(admin_pass)
+        new_admin = User(
+            email=admin_email,
+            hashed_password=hashed_pw,
+            full_name=admin_name,
+            role=UserRole.ADMIN,
+            organization_id=org_id
+        )
         
-        result = await db.execute(select(User).where(User.email == admin_email))
-        admin = result.scalars().first()
-        
-        if not admin:
-            hashed_pw = get_password_hash(admin_pass)
-            admin = User(
-                email=admin_email,
-                hashed_password=hashed_pw,
-                full_name="Administrador Boltzman",
-                role=UserRole.ADMIN,
-                organization_id=org.id
-            )
-            db.add(admin)
-            print(f"   ✅ Usuario '{admin_email}' creado.")
-        else:
-            admin.role = UserRole.ADMIN
-            admin.hashed_password = get_password_hash(admin_pass)
-            print(f"   ✅ Usuario '{admin_email}' actualizado.")
-        
-        await db.commit()
-
-    await engine.dispose()
-    print("\n🎉 ¡SETUP FINALIZADO CON ÉXITO! 🎉")
-    print("La base de datos está lista y el administrador registrado.")
+        try:
+            db.add(new_admin)
+            await db.commit()
+            print(f"\n✅ ¡ÉXITO! Administrador '{admin_email}' creado correctamente con contraseña '{admin_pass}'.")
+        except Exception as e:
+            print(f"❌ Error al guardar en base de datos: {e}")
 
 if __name__ == "__main__":
-    asyncio.run(super_setup())
+    asyncio.run(create_jefe())
