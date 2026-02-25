@@ -48,10 +48,10 @@ async def create_appointment(
     # NOTIFICACIÓN A TÉCNICOS: Nuevo trabajo disponible
     try:
         from app.api.v1.notifications import send_push_notification
-        # Buscar tokens de todos los técnicos
+        print(f"[DEBUG] Iniciando búsqueda de técnicos para notificar cita {new_appo.id}...")
         tech_result = await db.execute(select(User.push_token).where(User.role == UserRole.TECHNICIAN).where(User.push_token != None))
         tech_tokens = tech_result.scalars().all()
-        print(f"[DEBUG] Found {len(tech_tokens)} technician(s) with push tokens: {list(tech_tokens)}")
+        print(f"[DEBUG] Técnicos encontrados: {len(tech_tokens)}. Tokens: {list(tech_tokens)}")
         if tech_tokens:
             await send_push_notification(
                 tokens=list(tech_tokens),
@@ -60,9 +60,9 @@ async def create_appointment(
                 data={"appointment_id": new_appo.id, "type": "NEW_JOB"}
             )
         else:
-            print("[DEBUG] No technician tokens found in DB.")
+            print("[DEBUG] No se enviará notificación: 0 técnicos con token.")
     except Exception as e:
-        print(f"Error notifying technicians: {e}")
+        print(f"[ERROR] Error al notificar técnicos: {str(e)}")
 
     return {"status": "success", "message": "Mantenimiento programado correctamente"}
 
@@ -108,6 +108,30 @@ async def get_technician_jobs(
 
     result = await db.execute(query)
     return result.scalars().all()
+
+@router.get("/finance/pending")
+async def get_pending_payments(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Lista de trabajos que requieren pago o verificación (Solo Admins)."""
+    if current_user.role != UserRole.ADMIN:
+        raise HTTPException(status_code=403, detail="No autorizado")
+    
+    from sqlalchemy.orm import selectinload
+    query = select(ServiceAppointment).options(
+        selectinload(ServiceAppointment.device).selectinload(Device.owner),
+        selectinload(ServiceAppointment.technician)
+    ).where(
+        ServiceAppointment.status.in_([
+            AppointmentStatus.PENDING_PAYMENT, 
+            AppointmentStatus.PAYMENT_VERIFYING
+        ])
+    ).order_by(ServiceAppointment.completed_at.desc())
+
+    result = await db.execute(query)
+    return result.scalars().all()
+
 
 class TimerUpdate(BaseModel):
     action: str # "start_travel" | "arrive"
@@ -188,6 +212,14 @@ async def get_appointment_by_id(
     appo = result.scalars().first()
     if not appo:
         raise HTTPException(status_code=404, detail="Cita no encontrada")
+    
+    # --- PROTECCIÓN DE DATOS FINANCIEROS ---
+    # Si el usuario es técnico, no debe ver el costo ni datos de pago
+    if current_user.role == UserRole.TECHNICIAN:
+        appo.total_cost = 0.0
+        appo.payment_reference = None
+        appo.payment_screenshot_url = None
+        
     return appo
 
 class AppointmentStatusUpdate(BaseModel):
@@ -241,19 +273,23 @@ async def update_appointment_status(
     # --- NOTIFICACIONES DE ASIGNACIÓN ---
     if technician_changed:
         from app.api.v1.notifications import send_push_notification
+        print(f"[DEBUG] Notificando cambio de técnico en cita {appo.id}...")
         # 1. Notificar al Técnico
         try:
             res_tech = await db.execute(select(User).where(User.id == appo.technician_id))
             tech_user = res_tech.scalars().first()
             if tech_user and tech_user.push_token:
+                print(f"[DEBUG] Enviando push a técnico {tech_user.email}...")
                 await send_push_notification(
                     tokens=tech_user.push_token,
                     title="🔧 Nuevo Servicio Asignado",
                     body=f"El administrador te ha asignado un nuevo servicio de {appo.service_type}.",
                     data={"appointment_id": appo.id, "type": "ASSIGNED_JOB"}
                 )
+            else:
+                print(f"[WARNING] Técnico {appo.technician_id} no tiene token o no existe.")
         except Exception as e:
-            print(f"Error notifying technician (assigned): {e}")
+            print(f"[ERROR] Error al notificar al técnico: {e}")
 
         # 2. Notificar al Cliente
         try:
@@ -262,14 +298,17 @@ async def update_appointment_status(
             if client_user and client_user.push_token:
                 # Obtener nombre del técnico para personalizar el mensaje
                 tech_name = tech_user.full_name if tech_user else "un técnico"
+                print(f"[DEBUG] Enviando push a cliente {client_user.email}...")
                 await send_push_notification(
                     tokens=client_user.push_token,
                     title="✅ Técnico Asignado",
                     body=f"Se ha asignado a {tech_name} para tu servicio de {appo.service_type}.",
                     data={"appointment_id": appo.id, "type": "TECH_ASSIGNED"}
                 )
+            else:
+                print(f"[WARNING] Cliente {appo.client_id} no tiene token.")
         except Exception as e:
-            print(f"Error notifying client (tech_assigned): {e}")
+            print(f"[ERROR] Error al notificar al cliente: {e}")
 
     # --- NOTIFICACIONES AL CLIENTE ---
     from app.api.v1.notifications import send_push_notification
@@ -483,4 +522,82 @@ async def verify_payment(
     except Exception as e:
         print(f"Error notifying client (verify_payment): {e}")
     
-    return {"status": "success", "message": "Pago verificado correctamente"}
+@router.post("/{id}/cancel")
+async def cancel_appointment(
+    id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Permite cancelar una cita con lógica de seguridad por rol."""
+    result = await db.execute(select(ServiceAppointment).where(ServiceAppointment.id == id))
+    appo = result.scalars().first()
+    
+    if not appo:
+        raise HTTPException(status_code=404, detail="Cita no encontrada")
+
+    # Si ya está cancelada o pagada, no se puede cancelar
+    if appo.status in [AppointmentStatus.CANCELLED, AppointmentStatus.PAID]:
+        raise HTTPException(status_code=400, detail=f"No se puede cancelar una cita en estado {appo.status.value}")
+
+    can_cancel = False
+    
+    # 1. ADMIN puede cancelar siempre
+    if current_user.role == UserRole.ADMIN:
+        can_cancel = True
+    
+    # 2. TÉCNICO puede cancelar si es el asignado
+    elif current_user.role == UserRole.TECHNICIAN:
+        if appo.technician_id == current_user.id:
+            can_cancel = True
+        else:
+            raise HTTPException(status_code=403, detail="No puedes cancelar un trabajo asignado a otro técnico")
+            
+    # 3. CLIENTE puede cancelar SOLO si está PENDING (nadie ha aceptado)
+    else:
+        if appo.client_id == current_user.id:
+            if appo.status == AppointmentStatus.PENDING:
+                can_cancel = True
+            else:
+                raise HTTPException(
+                    status_code=400, 
+                    detail="No puedes cancelar porque un técnico ya aceptó tu solicitud. Por favor contacta a soporte."
+                )
+        else:
+            raise HTTPException(status_code=403, detail="No autorizado para cancelar esta cita")
+
+    if not can_cancel:
+        raise HTTPException(status_code=403, detail="No tienes permisos para realizar esta acción")
+
+    appo.status = AppointmentStatus.CANCELLED
+    await db.commit()
+
+    # NOTIFICACIONES DE CANCELACIÓN
+    try:
+        from app.api.v1.notifications import send_push_notification
+        # Si el cliente cancela, avisar a técnicos (si estaba en la bolsa) o al técnico asignado
+        # Si el técnico/admin cancela, avisar al cliente
+        notify_users = []
+        
+        if current_user.id == appo.client_id:
+            # Cliente canceló -> Avisar admin y técnico (si hay)
+            admin_result = await db.execute(select(User.push_token).where(User.role == UserRole.ADMIN).where(User.push_token != None))
+            notify_users.extend(admin_result.scalars().all())
+            if appo.technician_id:
+                res_tech = await db.execute(select(User.push_token).where(User.id == appo.technician_id))
+                notify_users.extend(res_tech.scalars().all())
+        else:
+            # Admin o Técnico canceló -> Avisar cliente
+            res_client = await db.execute(select(User.push_token).where(User.id == appo.client_id))
+            notify_users.extend(res_client.scalars().all())
+
+        if notify_users:
+            await send_push_notification(
+                tokens=list(set(notify_users)),
+                title="🚫 Cita Cancelada",
+                body=f"La cita para {appo.service_type} ha sido cancelada.",
+                data={"appointment_id": id, "type": "APPOINTMENT_CANCELLED"}
+            )
+    except Exception as e:
+        print(f"Error notifying cancellation: {e}")
+
+    return {"status": "success", "message": "Cita cancelada correctamente"}

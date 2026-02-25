@@ -8,34 +8,26 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# Fix para Windows Event Loop
 if os.name == 'nt':
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
 DATABASE_URL = os.getenv("DATABASE_URL")
-
-if not DATABASE_URL:
-    print("❌ Error: No se encontró DATABASE_URL en el archivo .env")
-    exit(1)
-
 if DATABASE_URL.startswith("postgres://"):
     DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql+asyncpg://", 1)
 elif DATABASE_URL.startswith("postgresql://") and "+asyncpg" not in DATABASE_URL:
     DATABASE_URL = DATABASE_URL.replace("postgresql://", "postgresql+asyncpg://", 1)
 
-engine = create_async_engine(DATABASE_URL)
-AsyncSessionLocal = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
-
-async def check_tokens():
-    async with AsyncSessionLocal() as db:
-        result = await db.execute(select(User).where(User.push_token != None))
+async def check():
+    engine = create_async_engine(DATABASE_URL)
+    AsyncSessionLocal = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(select(User))
         users = result.scalars().all()
-        print(f"\n--- USUARIOS CON PUSH TOKEN ({len(users)}) ---")
+        print("\n--- LISTA DE USUARIOS ---")
         for u in users:
-            print(f"User: {u.email} | Role: {u.role} | Token: {u.push_token}")
-        
-        if not users:
-            print("No se encontraron usuarios con token registrado.")
+            role_str = str(u.role).replace("UserRole.", "")
+            print(f"EMAIL: {u.email:<30} | ROLE: {role_str:<25} | TOKEN: {'SI' if u.push_token else 'NO'}")
+    await engine.dispose()
 
 if __name__ == "__main__":
-    asyncio.run(check_tokens())
+    asyncio.run(check())
